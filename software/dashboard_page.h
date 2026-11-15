@@ -1896,7 +1896,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
                 </div>
                 <div class="form-field">
                   <label for="inpExTarget">Daily exercise target (min)</label>
-                  <input type="number" id="inpExTarget" min="10" max="400" placeholder="e.g. 150" />
+                  <input type="number" id="inpExTarget" min="10" max="400" placeholder="NASA: 90" />
                 </div>
                 <div class="form-field full">
                   <label for="inpNotes"><span class="field-icon ic-notes">&#128221;</span>Notes</label>
@@ -3319,7 +3319,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
       return {
         p: p,
         maxHr: age > 0 ? 220 - age : 190,
-        target: parseFloat(p.exTarget) > 0 ? parseFloat(p.exTarget) : 120,
+        target: parseFloat(p.exTarget) > 0 ? parseFloat(p.exTarget) : 90, // NASA HRP: ~1.5 h/day on the ISS
         bmd: parseFloat(p.bmd) || 0,
         muscle: parseFloat(p.muscle) || 0,
         mission: p.mission || ""
@@ -3468,7 +3468,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
     // Coping strategies inspired by NASA behavioral-health countermeasures for long missions
     const FEEL_TIPS = {
       Stressed: "Try slow breathing: inhale 4 seconds, hold 2, exhale 6, for 2 minutes. Then step away from the task and spend a few minutes at a window looking at Earth or the stars.",
-      Tired: "Rest matters. If your schedule allows, take a short break, dim the lights, and keep a consistent sleep time tonight. Avoid screens and hard exercise in the hour before bed.",
+      Tired: "Rest matters. If your schedule allows, take a short break and keep a consistent sleep time tonight. NASA uses lighting that follows Earth's day-night cycle: keep lights bright by day, dim them before bed, and avoid caffeine late in the day.",
       Lonely: "Feeling distant from home is common on long missions. A call or message to family or friends can help; I can flag that you would like contact. Time near a window or caring for the on-board plants can also help you feel connected.",
       Low: "Thank you for sharing that. Try writing a few lines in your journal about how you feel, then do something small and calming, like tending the plants or looking out of the window. Talking with a crewmate can help too.",
       Fine: "Good to hear. Keep up your routine, exercise and sleep. A short journal entry tonight helps you notice changes over time."
@@ -3480,15 +3480,17 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
         { k: "plants", t: "Tend the on-board plants: water, check and photograph their growth." },
         { k: "journal", t: "Write a short journal entry about your day and how you feel." },
         { k: "family", t: "Plan a private call or message with family or friends." },
-        { k: "sleep", t: "Keep a regular sleep time; dim lights and avoid screens before bed." },
+        { k: "sleep", t: "Keep a regular sleep time; bright light by day, dim light and no late caffeine before bed (NASA lighting countermeasure)." },
         { k: "breath", t: "Slow breathing for 2 minutes (in 4 s, hold 2 s, out 6 s)." },
-        { k: "exercise", t: "Stay on your exercise plan; it also improves mood and sleep." }
+        { k: "exercise", t: "Stay on your exercise plan (NASA: ~1.5 h/day, 6-7 days a week); it also improves mood and sleep." },
+        { k: "selfcare", t: "Protect some relaxation and self-care time today to prevent burnout." }
       ];
       const pri = {};
       if (sv && sv.iso >= 4) { pri.family = 3; pri.window = 2; pri.plants = 1; }
       if (sv && sv.mood <= 2) { pri.journal = 3; pri.plants = (pri.plants || 0) + 2; pri.window = (pri.window || 0) + 1; }
       if ((sv && sv.sleep <= 2) || (sl && (sl.durMin < 360 || (sl.score !== null && sl.score < 50)))) pri.sleep = 4;
-      if (sv && sv.stress >= 4) pri.breath = 3;
+      if (sv && sv.stress >= 4) { pri.breath = 3; pri.selfcare = 2; }
+      if (sv && sv.work >= 4) pri.selfcare = 3;
       if (stressNow !== null && stressNow >= STRESS_HIGH) pri.breath = 5;
       return tips.map((x, i) => ({ ...x, p: (pri[x.k] || 0) - i / 100 })).sort((a, b) => b.p - a.p).map((x) => x.t);
     }

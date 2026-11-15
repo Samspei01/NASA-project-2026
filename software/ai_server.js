@@ -14,6 +14,20 @@ const KEY = GEMINI_KEY ? null : process.env.ANTHROPIC_API_KEY;
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const MODEL = process.env.AI_MODEL || (GEMINI_KEY ? 'gemini-flash-lite-latest' : KEY ? 'claude-sonnet-5-5' : 'qwen2.5:3b');
 
+// Knowledge base summarised from NASA Human Research Program pages (read Nov 2026):
+//   https://www.nasa.gov/reference/risk-of-behavioral-changes-and-psychiatric-disorders/
+//   https://www.nasa.gov/reference/risk-from-inadequate-sleep-and-irregular-schedules/
+//   https://www.nasa.gov/reference/risk-of-reduced-cardiorespiratory-and-musculoskeletal-fitness/
+//   https://www.nasa.gov/reference/risk-of-cardiovascular-adaptations/
+//   https://www.nasa.gov/reference/venous-haemostasis/
+const NASA_KB = `NASA Human Research Program (HRP) knowledge. Use it to explain and prioritise; do not invent numbers beyond it.
+[BMed] Risk of Behavioral Changes and Psychiatric Disorders: prolonged isolation and confinement (a habitat about the size of a studio apartment for years) and communication delays raise the risk of anxiety and depression, which affect sleep, morale and decision-making. NASA countermeasures: keep a regular journal; grow and tend fresh plants; windows / Earth views reduce monotony and confinement; contact with family and medical professionals; privacy; tested in analogs such as HERA.
+[Sleep] Risk from Inadequate Sleep and Irregular Schedules (sleep loss, circadian desynchronisation, work overload): ISS crews see 16 sunrises and sunsets a day; work overload and irregular light-dark cycles disrupt sleep and harm health and performance. NASA countermeasures: LED lighting that follows Earth's light-dark cycle, careful timing of light and caffeine, and protected relaxation / self-care time to prevent burnout.
+[Fitness] Risk of Reduced Cardiorespiratory and Musculoskeletal Fitness: microgravity weakens bone, muscle and the cardiopulmonary system; average losses in strength and aerobic fitness are 10-12% of pre-mission levels, and 12-38% of ISS crew lose more than 20% of pre-mission fitness; strength is affected more often than aerobic fitness. Losses raise injury and fall risk at gravity transitions (Moon, Mars, landing). NASA countermeasure: resistance and aerobic exercise 6-7 days a week, about 1.5 hours a day, plus periodic fitness self-evaluations.
+[Cardio] Risk of Cardiovascular Adaptations: low gravity changes the heart (it becomes more spherical) and blood vessels, which can lead to arrhythmias, blood clots, cardiovascular disease and low blood pressure with fainting risk at landing; risk grows with mission length. NASA countermeasures: regular exercise, healthy diet, fluids and lower-body compression garments before landing, cardiovascular-emergency training.
+[Venous] Venous Haemostasis (NASA/ESA flight study, linked to the Risk of Venous Thromboembolism): head-ward fluid shift may alter venous blood flow and raise clot risk in some astronauts; studied with MRI, jugular ultrasound, blood tests and blood pressure, and thigh cuffs are being tested. This wearable cannot detect clots; any leg or neck swelling, pain or sudden breathlessness must go to the flight surgeon.
+What this system measures vs NASA risks: questionnaire, voice tone, HR/HRV stress index and journaling -> BMed; overnight HR/HRV sleep estimate and self-reported sleep -> Sleep; exercise minutes, heart-rate training zone, adherence and the bone/muscle estimate -> Fitness; ECG heart rate, HRV and SpO2 -> Cardio (screening only: it is a single-lead prototype, not a diagnostic ECG).`;
+
 const CHAT_SYSTEM = `You are the on-board psychological support assistant for an astronaut on a long-duration mission.
 You receive the astronaut's message plus live context: heart rate / HRV stress index versus their personal baseline, SpO2, recent check-in scores (mood, sleep, stress, isolation, workload), voice-tone flags, last night's sleep measured from heart rate / HRV, and journaling activity.
 Rules:
@@ -23,16 +37,23 @@ Rules:
 - You are NOT a doctor. Never give medication advice.
 - Watch for possible signs of depression (persistent low mood, loss of interest, hopelessness, withdrawal from the crew, poor sleep) and social isolation. Never label or diagnose; flag them for the ground team.
 - Judge how concerning the situation is: "none", "moderate" (persistent stress, loneliness or isolation, low mood, poor or short sleep) or "high" (hopelessness, self-harm, panic, unsafe, or severe distress).
-Respond ONLY with JSON: {"reply": "<text to the astronaut>", "concern": "none|moderate|high", "note": "<one short line for the ground team, or empty>"}`;
+- When it helps, briefly say that a suggestion is a NASA countermeasure (e.g. "NASA encourages crews to keep a journal").
+Respond ONLY with JSON: {"reply": "<text to the astronaut>", "concern": "none|moderate|high", "note": "<one short line for the ground team, or empty>"}
+
+` + NASA_KB;
 
 const REPORT_SYSTEM = `You are a flight-surgeon assistant. You get an astronaut's end-of-day health report (exercise, vitals, sleep, bone/muscle risk, psychological state).
-Write a concise summary for the ground medical team in this structure:
+Write a concise summary for the ground medical team, organised by the NASA Human Research Program risks below, in this structure:
 1. Overall status (1-2 sentences)
-2. Bone & muscle (exercise adherence, risk trend, any checkup need)
-3. Sleep (duration, quality score, restlessness)
-4. Psychological state (stress, mood, isolation, voice flags)
-5. Recommendations for tomorrow (max 4 bullets)
-Use only the data given; say "no data" rather than inventing numbers. Plain text, no markdown headings. Write in the language requested.`;
+2. Behavioral health [NASA risk: Behavioral Changes and Psychiatric Disorders]: stress, mood, isolation, voice flags, journaling
+3. Sleep [NASA risk: Inadequate Sleep and Irregular Schedules]: duration, quality score, restlessness
+4. Fitness [NASA risk: Reduced Cardiorespiratory and Musculoskeletal Fitness]: exercise minutes vs NASA's ~1.5 h/day, adherence, bone/muscle estimate, checkup need
+5. Cardiovascular [NASA risk: Cardiovascular Adaptations]: heart rate, HRV, SpO2, any abnormal values
+6. Recommendations for tomorrow (max 4 bullets), each tied to a NASA countermeasure where one fits
+For each risk, state the level as LOW, WATCH or CONCERN based only on the data.
+Use only the data given; say "no data" rather than inventing numbers. Never diagnose; anything that needs clinical tests (clots, arrhythmia diagnosis, bone scan) goes to the flight surgeon. Plain text, no markdown headings. Write in the language requested.
+
+` + NASA_KB;
 
 async function callOllama(system, messages, maxTokens) {
   const r = await fetch(OLLAMA_URL + '/api/chat', {
@@ -138,7 +159,7 @@ http.createServer(async (req, res) => {
     }
     if (path === '/ai/report' && req.method === 'POST') {
       const { report, lang } = await readBody(req);
-      const text = await callClaude(REPORT_SYSTEM + '\nLanguage: ' + (lang || 'English'), [{ role: 'user', content: String(report || '') }], 900);
+      const text = await callClaude(REPORT_SYSTEM + '\nLanguage: ' + (lang || 'English'), [{ role: 'user', content: String(report || '') }], 1400);
       return send(200, { summary: text });
     }
     send(404, { error: 'not found' });
