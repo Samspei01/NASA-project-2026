@@ -2022,7 +2022,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
             <div class="alerts-hero glass" style="background:linear-gradient(120deg,#4c1d95,#7c3aed 50%,#2563eb)">
               <div>
                 <h3>&#129504; Psychological &amp; Behavioral Monitor</h3>
-                <p>Stress from heart rate &amp; HRV vs. personal baseline, voice, and check-ins</p>
+                <p>Stress from heart rate &amp; HRV vs. personal baseline, voice, check-ins and sleep</p>
               </div>
               <span class="alerts-status-badge good" id="stressBadge">NO BASELINE</span>
             </div>
@@ -2072,6 +2072,30 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
                   <button type="button" class="btn btn-log btn-log-start" id="btnComm">&#128225; Communication session: send queue</button>
                 </div>
                 <div class="note-small">Alerts are held on board and delivered to ground specialists at the next communication session.</div>
+              </div>
+            </div>
+            <div class="two-col">
+              <div class="card-pad glass">
+                <h4>&#128564; Sleep monitor</h4>
+                <div class="note-small" style="margin:0 0 8px">Keep the ECG leads on overnight. Press "Going to sleep" at bedtime and "Woke up" in the morning. Sleep quality is estimated from overnight heart rate and HRV (heuristic, not a diagnosis).</div>
+                <div class="row-between"><span>Status</span><span id="slState">Awake</span></div>
+                <div class="row-between"><span>Last sleep duration</span><span id="slDur">--</span></div>
+                <div class="row-between"><span>Restful time (calm HR)</span><span id="slRest">--</span></div>
+                <div class="row-between"><span>Restless periods</span><span id="slWake">--</span></div>
+                <div class="row-between"><span>Sleeping HR / HRV</span><span id="slHr">--</span></div>
+                <div class="row-between"><span>Sleep score</span><span id="slScore">--</span></div>
+                <div class="form-actions">
+                  <button type="button" class="btn btn-log btn-log-start" id="btnSleepStart">&#127769; Going to sleep</button>
+                  <button type="button" class="btn btn-log btn-log-stop" id="btnSleepStop">&#9728; Woke up</button>
+                </div>
+                <div class="note-small" id="slMsg"></div>
+              </div>
+              <div class="card-pad glass">
+                <h4>&#127793; Coping ideas &amp; journal</h4>
+                <ul class="alert-suggest-list" id="copeList"></ul>
+                <textarea id="journalInput" placeholder="Journal: write a few lines about your day (kept on board, only the count is reported)..." style="width:100%;min-height:64px;margin-top:8px;padding:8px 10px;border-radius:10px;border:1px solid #cbd5e1;font:inherit;resize:vertical"></textarea>
+                <div class="form-actions"><button type="button" class="btn btn-primary" id="btnJournal">Save journal entry</button></div>
+                <div class="note-small" id="journalMsg"></div>
               </div>
             </div>
           </section>
@@ -3243,7 +3267,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
     }
 
     function loadAstro() {
-      const base = { days: {}, baseline: null, voiceBase: null, lastCheckup: "", queue: [], lastSurvey: null };
+      const base = { days: {}, baseline: null, voiceBase: null, lastCheckup: "", queue: [], lastSurvey: null, sleepSes: null, lastSleep: null };
       try {
         const s = localStorage.getItem(ASTRO_KEY);
         if (s) {
@@ -3262,7 +3286,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
       if (!astro.days[key]) {
         astro.days[key] = { zoneSec: 0, sesSec: 0, sessions: 0, hrMax: 0, spo2Min: 0,
           hrSum: 0, hrN: 0, hrvSum: 0, hrvN: 0, spo2Sum: 0, spo2N: 0, tSum: 0, tN: 0,
-          stressSum: 0, stressN: 0, stressMax: 0, highSec: 0, surveys: [], voice: [] };
+          stressSum: 0, stressN: 0, stressMax: 0, highSec: 0, surveys: [], voice: [], sleep: null, journal: 0 };
       }
       return astro.days[key];
     }
@@ -3441,12 +3465,149 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
         row.appendChild(b);
       });
     }
+    // Coping strategies inspired by NASA behavioral-health countermeasures for long missions
     const FEEL_TIPS = {
-      Stressed: "Try slow breathing: inhale 4 seconds, hold 2, exhale 6, for 2 minutes. Then step away from the task for a short break.",
-      Tired: "Rest matters. If your schedule allows, take a short break, dim the lights, and keep a consistent sleep time tonight.",
-      Lonely: "Feeling distant from home is common on long missions. A call or message to family or friends can help; I can flag that you would like contact.",
-      Fine: "Good to hear. Keep up your routine, exercise and sleep."
+      Stressed: "Try slow breathing: inhale 4 seconds, hold 2, exhale 6, for 2 minutes. Then step away from the task and spend a few minutes at a window looking at Earth or the stars.",
+      Tired: "Rest matters. If your schedule allows, take a short break, dim the lights, and keep a consistent sleep time tonight. Avoid screens and hard exercise in the hour before bed.",
+      Lonely: "Feeling distant from home is common on long missions. A call or message to family or friends can help; I can flag that you would like contact. Time near a window or caring for the on-board plants can also help you feel connected.",
+      Low: "Thank you for sharing that. Try writing a few lines in your journal about how you feel, then do something small and calming, like tending the plants or looking out of the window. Talking with a crewmate can help too.",
+      Fine: "Good to hear. Keep up your routine, exercise and sleep. A short journal entry tonight helps you notice changes over time."
     };
+    function copingTips() {
+      const sv = astro.lastSurvey, sl = astro.lastSleep;
+      const tips = [
+        { k: "window", t: "Spend 5-10 minutes at a window looking at Earth or space." },
+        { k: "plants", t: "Tend the on-board plants: water, check and photograph their growth." },
+        { k: "journal", t: "Write a short journal entry about your day and how you feel." },
+        { k: "family", t: "Plan a private call or message with family or friends." },
+        { k: "sleep", t: "Keep a regular sleep time; dim lights and avoid screens before bed." },
+        { k: "breath", t: "Slow breathing for 2 minutes (in 4 s, hold 2 s, out 6 s)." },
+        { k: "exercise", t: "Stay on your exercise plan; it also improves mood and sleep." }
+      ];
+      const pri = {};
+      if (sv && sv.iso >= 4) { pri.family = 3; pri.window = 2; pri.plants = 1; }
+      if (sv && sv.mood <= 2) { pri.journal = 3; pri.plants = (pri.plants || 0) + 2; pri.window = (pri.window || 0) + 1; }
+      if ((sv && sv.sleep <= 2) || (sl && (sl.durMin < 360 || (sl.score !== null && sl.score < 50)))) pri.sleep = 4;
+      if (sv && sv.stress >= 4) pri.breath = 3;
+      if (stressNow !== null && stressNow >= STRESS_HIGH) pri.breath = 5;
+      return tips.map((x, i) => ({ ...x, p: (pri[x.k] || 0) - i / 100 })).sort((a, b) => b.p - a.p).map((x) => x.t);
+    }
+    function renderCoping() {
+      $("copeList").innerHTML = copingTips().slice(0, 5).map((t) => "<li>" + esc(t) + "</li>").join("");
+    }
+    const JOURNAL_KEY = "phm_journal_v1";
+    function saveJournal() {
+      const inp = $("journalInput");
+      const text = inp.value.trim();
+      if (!text) { $("journalMsg").textContent = "Write something first."; return; }
+      try {
+        const all = JSON.parse(localStorage.getItem(JOURNAL_KEY) || "[]");
+        all.push({ ts: Date.now(), text: text });
+        while (all.length > 200) all.shift();
+        localStorage.setItem(JOURNAL_KEY, JSON.stringify(all));
+      } catch (e) {}
+      const d = getDay();
+      d.journal = (d.journal || 0) + 1;
+      saveAstro();
+      inp.value = "";
+      $("journalMsg").textContent = "Saved privately on board. Entries today: " + d.journal + ".";
+    }
+
+    // ---------- Problem 3: sleep estimated from overnight HR / HRV ----------
+    const SLEEP_MIN_MS = 30 * 60 * 1000;
+    function newSleepMin() { return { hr: [], hrv: [] }; }
+    function startSleep() {
+      if (astro.sleepSes) return;
+      if (ses.running) stopSession();
+      astro.sleepSes = { startMs: Date.now(), curMin: 0, cur: newSleepMin(), mins: [] };
+      saveAstro();
+      $("slMsg").textContent = "Sleep tracking started. Good night.";
+      renderSleep();
+    }
+    // Close one minute of data: [avg HR, avg HRV, HR range] or null when the signal was missing
+    function flushSleepMin(s) {
+      const c = s.cur;
+      if (c.hr.length >= 20) {
+        const hv = c.hrv.length ? Math.round(mean(c.hrv)) : 0;
+        s.mins.push([Math.round(mean(c.hr)), hv, Math.max.apply(null, c.hr) - Math.min.apply(null, c.hr)]);
+      } else s.mins.push(null);
+      s.cur = newSleepMin();
+    }
+    function sleepTick(valid, bpm, hrv) {
+      const s = astro.sleepSes;
+      if (!s) return;
+      const idx = Math.floor((Date.now() - s.startMs) / 60000);
+      if (idx !== s.curMin) {
+        flushSleepMin(s);
+        while (s.mins.length < idx) s.mins.push(null); // browser was closed: no data for those minutes
+        s.curMin = idx;
+      }
+      if (valid) { s.cur.hr.push(bpm); if (hrv > 0) s.cur.hrv.push(hrv); }
+    }
+    function analyzeSleep(s) {
+      const durMin = Math.round((Date.now() - s.startMs) / 60000);
+      const good = s.mins.filter((m) => m);
+      const r = { ts: Date.now(), start: s.startMs, durMin: durMin, coverage: durMin > 0 ? good.length / durMin : 0,
+        restPct: null, restless: null, hr: null, hrv: null, score: null };
+      if (good.length < 20) return r;
+      const hrs = good.map((m) => m[0]).slice().sort((a, b) => a - b);
+      // Calm minute: HR at or below awake resting baseline (or near the night's low) and steady within the minute
+      const ref = astro.baseline ? astro.baseline.hr : hrs[Math.floor(hrs.length * 0.25)] * 1.15;
+      const calm = (m) => m[0] <= ref && m[2] < 12;
+      let restful = 0, restless = 0, run = 0;
+      s.mins.forEach((m) => {
+        if (!m) return;
+        if (calm(m)) { restful++; run = 0; }
+        else { run++; if (run === 3) restless++; }
+      });
+      const hv = good.filter((m) => m[1] > 0).map((m) => m[1]);
+      r.restPct = restful / good.length;
+      r.restless = restless;
+      r.hr = Math.round(mean(good.map((m) => m[0])));
+      r.hrv = hv.length ? Math.round(mean(hv)) : null;
+      r.score = Math.round(clamp(100 * (0.5 * clamp(durMin / 480, 0, 1) + 0.5 * r.restPct) - 3 * Math.max(0, restless - 3), 0, 100));
+      return r;
+    }
+    function stopSleep() {
+      const s = astro.sleepSes;
+      if (!s) return;
+      flushSleepMin(s);
+      astro.sleepSes = null;
+      if (Date.now() - s.startMs < SLEEP_MIN_MS) {
+        saveAstro();
+        $("slMsg").textContent = "Less than 30 minutes: not counted as a sleep period.";
+        renderSleep();
+        return;
+      }
+      const r = analyzeSleep(s);
+      getDay().sleep = r;
+      astro.lastSleep = r;
+      saveAstro();
+      const h = (r.durMin / 60).toFixed(1);
+      let msg = "Good morning. You slept " + h + " h" + (r.score !== null ? ", sleep score " + r.score + "/100." : ". Not enough heart signal to rate quality (check the ECG leads).");
+      if (r.coverage < 0.5) msg += " Signal covered only " + Math.round(r.coverage * 100) + "% of the night, so the estimate is less reliable.";
+      if (r.durMin < 360) queueAlert("warn", "Short sleep: " + h + " h (goal 7-8 h).", "sleep-short");
+      if (r.score !== null && r.score < 50) queueAlert("warn", "Poor sleep quality: score " + r.score + "/100, " + r.restless + " restless periods, sleeping HR " + r.hr + " BPM.", "sleep-poor");
+      const recent = Object.keys(astro.days).sort().slice(-3).map((k) => astro.days[k].sleep).filter((x) => x);
+      if (recent.length === 3 && recent.every((x) => x.durMin < 360)) {
+        queueAlert("bad", "Short sleep (< 6 h) on 3 nights in a row. Sleep debt may affect mood and performance.", "sleep-debt");
+        msg += " This is the third short night in a row; it has been flagged for the ground team.";
+      }
+      $("slMsg").textContent = msg;
+      renderSleep();
+    }
+    function renderSleep() {
+      const s = astro.sleepSes, r = astro.lastSleep;
+      if (s) {
+        const m = Math.floor((Date.now() - s.startMs) / 60000);
+        $("slState").textContent = "Sleeping (" + Math.floor(m / 60) + " h " + pad2(m % 60) + " m)";
+      } else $("slState").textContent = "Awake";
+      $("slDur").textContent = r ? (r.durMin / 60).toFixed(1) + " h" : "--";
+      $("slRest").textContent = r && r.restPct !== null ? Math.round(r.restPct * 100) + "%" : "--";
+      $("slWake").textContent = r && r.restless !== null ? r.restless : "--";
+      $("slHr").textContent = r && r.hr !== null ? r.hr + " BPM / " + (r.hrv !== null ? r.hrv + " ms" : "--") : "--";
+      $("slScore").textContent = r && r.score !== null ? r.score + "/100" : "--";
+    }
     function chatFeeling(f) {
       chatAdd("ai", FEEL_TIPS[f]);
       if (f === "Fine") { chatReplies([]); return; }
@@ -3462,7 +3623,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
     }
     function chatStart(prefix) {
       chatAdd("ai", (typeof prefix === "string" && prefix ? prefix + " " : "") + "How are you feeling right now?");
-      chatReplies(["Stressed", "Tired", "Lonely", "Fine"].map((f) => ({ label: f, fn: () => chatFeeling(f) })));
+      chatReplies(["Stressed", "Tired", "Lonely", "Low", "Fine"].map((f) => ({ label: f, fn: () => chatFeeling(f) })));
     }
     function intervene(reason) {
       lastIntervention = Date.now();
@@ -3498,7 +3659,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
     function stressTick(valid, bpm, hrv) {
       stepCalibration(valid, bpm, hrv);
       if (!astro.baseline) { stressNow = null; return; }
-      if (ses.running || !valid) { highSec = 0; return; }
+      if (ses.running || astro.sleepSes || !valid) { highSec = 0; return; }
       physioWin.push({ hr: bpm, hrv: hrv });
       if (physioWin.length > 60) physioWin.shift();
       if (physioWin.length < 20) return;
@@ -3554,7 +3715,16 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
         queueAlert("warn", "Check-in shows moderate concern (score " + r.score + "/100, mood " + r.mood + "/5, sleep " + r.sleep + "/5).", "survey");
         intervene("Your check-in suggests some strain.");
       }
+      // Possible depression indicator: low mood on 3 or more of the last 5 days with a check-in
+      const lowDays = Object.keys(astro.days).sort().slice(-14)
+        .map((k) => astro.days[k].surveys || []).filter((a) => a.length).slice(-5)
+        .filter((a) => Math.min.apply(null, a.map((x) => x.mood)) <= 2).length;
+      if (lowDays >= 3) {
+        msg += " Low mood on " + lowDays + " recent days: flagged for ground specialists.";
+        queueAlert("bad", "Persistent low mood: mood <= 2/5 on " + lowDays + " of the last 5 check-in days (possible depression indicator; needs professional assessment).", "lowmood");
+      }
       $("surveyMsg").textContent = msg;
+      renderCoping();
       renderMind();
     }
 
@@ -3676,11 +3846,21 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
         L.push("7-day adherence: " + (m.adh7 === null ? "n/a" : Math.round(m.adh7 * 100) + "%") + " | Days since checkup: " + (m.since === null ? "never" : m.since));
         L.push("");
       }
+      L.push("== SLEEP (from overnight HR / HRV) ==");
+      if (d.sleep) {
+        const sl = d.sleep;
+        L.push("Duration: " + (sl.durMin / 60).toFixed(1) + " h (" + new Date(sl.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " - " + new Date(sl.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ")");
+        if (sl.score !== null) L.push("Sleep score: " + sl.score + "/100 | Restful: " + Math.round(sl.restPct * 100) + "% | Restless periods: " + sl.restless + " | Sleeping HR " + sl.hr + " BPM, HRV " + (sl.hrv !== null ? sl.hrv + " ms" : "n/a"));
+        else L.push("Not enough heart signal to rate sleep quality.");
+        L.push("Signal coverage: " + Math.round(sl.coverage * 100) + "%");
+      } else L.push("No sleep period recorded.");
+      L.push("");
       L.push("== PSYCHOLOGICAL STATE ==");
       L.push("Stress index: avg " + avg(d.stressSum, d.stressN, 0) + ", max " + d.stressMax + " | Time at high stress: " + Math.round(d.highSec / 60) + " min");
       if (d.surveys.length) d.surveys.forEach((r) => L.push("Check-in " + new Date(r.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + ": mood " + r.mood + "/5, sleep " + r.sleep + "/5, concern score " + r.score + "/100"));
       else L.push("No check-in submitted.");
       if (d.voice.length) L.push("Voice checks: " + d.voice.length + " (" + d.voice.filter((v) => v.flag).length + " flagged)");
+      if (d.journal) L.push("Journal entries: " + d.journal + " (content kept private on board)");
       L.push("");
       L.push("== ITEMS REQUIRING ATTENTION ==");
       const att = [];
@@ -3689,6 +3869,8 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
       if (d.stressMax >= STRESS_HIGH) att.push("High stress detected (max index " + d.stressMax + ").");
       d.surveys.forEach((r) => { if (r.score >= 55 || r.mood <= 2) att.push("Check-in indicates concern (score " + r.score + ")."); });
       if (d.voice.some((v) => v.flag)) att.push("Voice tone changed vs baseline.");
+      if (d.sleep && d.sleep.durMin < 360) att.push("Short sleep (" + (d.sleep.durMin / 60).toFixed(1) + " h).");
+      if (d.sleep && d.sleep.score !== null && d.sleep.score < 50) att.push("Poor sleep quality (score " + d.sleep.score + ").");
       if (key === dayKey() && m.checkupDue) att.push("Bone/muscle checkup is due.");
       astro.queue.filter((q) => dayKey(new Date(q.ts)) === key && q.level !== "info").forEach((q) => att.push("Queued alert: " + q.text));
       if (!att.length) att.push("None.");
@@ -3756,8 +3938,10 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
       }
 
       stressTick(valid, bpm, hrv);
+      sleepTick(valid, bpm, hrv);
 
       if (tickCount % 60 === 0) {
+        renderCoping();
         const m = computeBone();
         if (m.checkupDue) queueAlert("warn", "Periodic bone/muscle checkup is due" + (m.since !== null ? " (" + m.since + " days since last)." : "."), "checkup");
         if (m.hasBase && m.adh7 !== null && m.adh7 < 0.5 && m.missionDay > 7) queueAlert("warn", "Exercise adherence is " + Math.round(m.adh7 * 100) + "% over 7 days.", "adherence");
@@ -3767,6 +3951,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
 
       if ($("page-bone").classList.contains("active")) renderBone();
       renderMind();
+      renderSleep();
     }
 
     // ---------- AI layer (Claude via the PC proxy ai_server.js) ----------
@@ -3805,6 +3990,9 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
         bodyTempC: lastVitals.bodyT > 0 ? lastVitals.bodyT : null,
         lastCheckin: sv ? { mood: sv.mood, sleep: sv.sleep, stress: sv.stress, isolation: sv.iso, workload: sv.work, concernScore: sv.score } : null,
         voiceFlagsToday: d.voice.filter((v) => v.flag).length,
+        lastSleep: astro.lastSleep ? { hours: +(astro.lastSleep.durMin / 60).toFixed(1), score: astro.lastSleep.score, restless: astro.lastSleep.restless, sleepingHr: astro.lastSleep.hr } : null,
+        sleepingNow: !!astro.sleepSes,
+        journalEntriesToday: d.journal || 0,
         minutesHighStressToday: Math.round(d.highSec / 60),
         boneMuscleRisk: m.hasBase ? m.risk : null, missionDay: m.missionDay
       };
@@ -3869,6 +4057,9 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
       $("btnCalibrate").addEventListener("click", () => { if (!connOnline || leadsOffState) { $("btnCalibrate").textContent = "Attach ECG leads first"; return; } startCalibration(); });
       $("btnVoice").addEventListener("click", voiceCheck);
       $("btnSurvey").addEventListener("click", submitSurvey);
+      $("btnSleepStart").addEventListener("click", startSleep);
+      $("btnSleepStop").addEventListener("click", stopSleep);
+      $("btnJournal").addEventListener("click", saveJournal);
       $("btnComm").addEventListener("click", () => {
         const now = Date.now();
         astro.queue.forEach((q) => { if (!q.sent) { q.sent = true; q.sentAt = now; } });
@@ -3883,7 +4074,7 @@ const char DASHBOARD_PAGE[] PROGMEM = R"rawliteral(
         if (b.dataset.page === "report") { refreshReportList(); renderReport(); }
       }));
       chatStart("Hello, I am your support assistant.");
-      renderQueue(); renderBone(); renderMind();
+      renderQueue(); renderBone(); renderMind(); renderSleep(); renderCoping();
       setInterval(astroTick, 1000);
     }
     initAstro();

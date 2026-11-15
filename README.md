@@ -31,13 +31,20 @@ There's no doctor on board, and contact with Earth is limited. So the crew needs
 - Calculate a **stress index** by comparing live HR/HRV with that baseline.
 - **Voice tone check:** records 8 seconds and compares pitch and energy with the astronaut's own baseline.
 - **Daily check-in questionnaire** covering mood, sleep, stress, isolation and workload.
-- **AI support assistant** (Arabic or English) that listens, asks gentle questions and suggests simple steps such as breathing, a break or calling family. It never diagnoses or gives medication advice.
+- **AI support assistant** (Arabic or English) that listens, asks gentle questions and suggests coping strategies inspired by NASA recommendations: time near a window looking at Earth, tending the on-board plants, journaling, slow breathing, a regular sleep routine or calling family. It never diagnoses or gives medication advice.
+- **Coping ideas & private journal:** a personalised list of coping strategies (re-ordered by mood, isolation, stress and sleep) and a journal kept on board; only the number of entries is reported.
+- **Persistent low mood alert:** low mood on 3 of the last 5 check-in days is flagged to the ground team as a possible depression indicator for professional assessment.
 - **Ground-team queue:** if concerning signs continue, an alert is saved and sent at the next communication window.
 
-### 3. End-of-day report 📄
-Every day, the system creates a report with exercise, vitals, bone/muscle risk and mental state. The AI writes a **short summary for the flight surgeon** (English or Arabic).
+### 3. Sleep monitor 😴
+- The astronaut presses **"Going to sleep"** and **"Woke up"**; the ECG keeps recording overnight.
+- Each minute is classed as **restful** (heart rate at or below the resting baseline and steady) or not. The system reports sleep duration, % restful time, restless periods, sleeping HR / HRV and a **sleep score** (0–100).
+- Alerts for **short sleep (< 6 h)**, **poor quality (score < 50)** and **3 short nights in a row** (sleep debt). Heuristic, not a clinical sleep study.
 
-### 4. Clinical monitoring
+### 4. End-of-day report 📄
+Every day, the system creates a report with exercise, vitals, sleep, bone/muscle risk and mental state. The AI writes a **short summary for the flight surgeon** (English or Arabic).
+
+### 5. Clinical monitoring
 - Live **ECG waveform**, heart rate, **SpO₂**, **body temperature**, and **cabin temperature and humidity**.
 - **Clinical Alert Center** with normal/warning/critical status and care suggestions.
 - **Data logging** at a chosen interval, with **Excel export**.
@@ -189,7 +196,7 @@ curl http://<your-pc-ip>:3000/ai/health    # {"ok":true,...}
 - Use real NASA/ISS physiological datasets to tune the bone/muscle loss model.
 - Run the AI locally on the device so it works without any connection to Earth.
 - Secure, encrypted, delay-tolerant link to ground stations.
-- Add more sensors: accelerometer for exercise detection, blood pressure, sleep tracking.
+- Add more sensors: accelerometer for exercise and sleep-movement detection, blood pressure.
 
 ---
 
